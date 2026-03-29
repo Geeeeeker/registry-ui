@@ -25,7 +25,7 @@ on:
         type: boolean
 
 jobs:
-  # ================== 并行编译 ==================
+  # ================== 并行编译并打包 ==================
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
@@ -81,19 +81,44 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          BIN_NAME="registry-ui-${{ matrix.goos }}-${{ matrix.goarch }}"
+          BIN_NAME="registry-ui"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             BIN_NAME="$BIN_NAME.exe"
           fi
           go build -ldflags="-s -w" -o "$BIN_NAME" .
           echo "BIN_NAME=$BIN_NAME" >> $GITHUB_ENV
 
+      # 打包：将二进制文件、templates/、static/ 打包为一个压缩包
+      - name: Package artifacts
+        if: steps.check_arch.outputs.selected == 'true'
+        run: |
+          # 创建临时目录
+          PACKAGE_DIR="registry-ui-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "$PACKAGE_DIR"
+          # 复制二进制文件
+          cp "${{ env.BIN_NAME }}" "$PACKAGE_DIR/"
+          # 复制资源目录（如果存在）
+          if [ -d "templates" ]; then
+            cp -r templates "$PACKAGE_DIR/"
+          fi
+          if [ -d "static" ]; then
+            cp -r static "$PACKAGE_DIR/"
+          fi
+          # 根据平台选择打包格式
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -r "$PACKAGE_DIR.zip" "$PACKAGE_DIR"
+            echo "PACKAGE_NAME=$PACKAGE_DIR.zip" >> $GITHUB_ENV
+          else
+            tar -czf "$PACKAGE_DIR.tar.gz" "$PACKAGE_DIR"
+            echo "PACKAGE_NAME=$PACKAGE_DIR.tar.gz" >> $GITHUB_ENV
+          fi
+
       - name: Upload artifact
         if: steps.check_arch.outputs.selected == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BIN_NAME }}
-          path: ${{ env.BIN_NAME }}
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ env.PACKAGE_NAME }}
           if-no-files-found: error
 
   # ================== 发布 Release ==================
