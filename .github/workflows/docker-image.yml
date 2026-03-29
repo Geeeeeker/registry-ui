@@ -1,44 +1,52 @@
-name: Build Multi-Platform Binaries
+name: Build and Release
 
 on:
-  push:
-    tags:
-      - 'v*'               # 推送 tag 时触发，如 v1.0.0
-  workflow_dispatch:       # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      release_name:
+        description: 'Release title'
+        required: true
+        default: 'Registry UI Release'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 定义目标平台和架构的组合
         include:
           # Linux
-          - goos: linux
-            goarch: amd64
+          - os: linux
+            arch: amd64
             ext: ''
-          - goos: linux
-            goarch: arm64
+          - os: linux
+            arch: arm64
             ext: ''
-          - goos: linux
-            goarch: 386
+          - os: linux
+            arch: arm
+            ext: ''
+          - os: linux
+            arch: 386
             ext: ''
           # Windows
-          - goos: windows
-            goarch: amd64
+          - os: windows
+            arch: amd64
             ext: '.exe'
-          - goos: windows
-            goarch: arm64
+          - os: windows
+            arch: arm64
             ext: '.exe'
-          - goos: windows
-            goarch: 386
+          - os: windows
+            arch: 386
             ext: '.exe'
-          # macOS (darwin)
-          - goos: darwin
-            goarch: amd64
+          # macOS
+          - os: darwin
+            arch: amd64
             ext: ''
-          - goos: darwin
-            goarch: arm64
+          - os: darwin
+            arch: arm64
             ext: ''
     steps:
       - name: Checkout code
@@ -47,7 +55,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'   # 项目要求 Go 1.23+
+          go-version: '1.23'   # 与项目 go.mod 保持一致
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -59,23 +67,40 @@ jobs:
 
       - name: Build binary
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0        # 禁用 CGO，生成静态链接的二进制，兼容性更好
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
         run: |
-          BIN_NAME="registry-ui-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          BIN_NAME="registry-ui-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
           go build -ldflags="-s -w" -o "$BIN_NAME" .
           echo "BIN_NAME=$BIN_NAME" >> $GITHUB_ENV
 
-      - name: Upload artifact (保留为工作流产物)
+      - name: Upload artifact (temporary)
         uses: actions/upload-artifact@v4
         with:
-          name: registry-ui-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ${{ env.BIN_NAME }}
           path: ${{ env.BIN_NAME }}
 
-      # 可选：如果希望推送到 Release，取消下面的注释
-      # - name: Upload to Release
-      #   uses: softprops/action-gh-release@v1
-      #   if: startsWith(github.ref, 'refs/tags/')
-      #   with:
-      #     files: ${{ env.BIN_NAME }}
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag_name }}
+          name: ${{ github.event.inputs.release_name }}
+          draft: false
+          prerelease: false
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
